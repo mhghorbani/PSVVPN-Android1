@@ -2,6 +2,7 @@ using Android.App;
 using Android.Content;
 using Android.Net;
 using Android.OS;
+using Java.IO;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
@@ -28,7 +29,6 @@ public class TunnelService : VpnService
         if (intent?.Action == "STOP")
         {
             StopTunnel();
-
             return StartCommandResult.NotSticky;
         }
 
@@ -37,12 +37,9 @@ public class TunnelService : VpnService
             StartForegroundNotification();
 
             cts?.Cancel();
-
             cts = new CancellationTokenSource();
 
-            _ = RunTunnel(
-                intent,
-                cts.Token);
+            _ = RunTunnel(intent, cts.Token);
         }
 
         return StartCommandResult.Sticky;
@@ -50,15 +47,12 @@ public class TunnelService : VpnService
 
     void StartForegroundNotification()
     {
-        const string channelId =
-            "psvvpn";
+        const string channelId = "psvvpn";
 
-        if (Build.VERSION.SdkInt >=
-            BuildVersionCodes.O)
+        if (Build.VERSION.SdkInt >= BuildVersionCodes.O)
         {
             var manager =
-                (NotificationManager)
-                GetSystemService(
+                (NotificationManager)GetSystemService(
                     NotificationService)!;
 
             var channel =
@@ -67,32 +61,35 @@ public class TunnelService : VpnService
                     "PSVVPN",
                     NotificationImportance.Low);
 
-            manager.CreateNotificationChannel(
-                channel);
+            manager.CreateNotificationChannel(channel);
         }
 
-        var builder =
-            Build.VERSION.SdkInt >=
-            BuildVersionCodes.O
-            ? new Notification.Builder(
-                this,
-                channelId)
-            : new Notification.Builder(this);
+        Notification.Builder builder;
+
+        if (Build.VERSION.SdkInt >= BuildVersionCodes.O)
+        {
+            builder =
+                new Notification.Builder(
+                    this,
+                    channelId);
+        }
+        else
+        {
+            builder =
+                new Notification.Builder(this);
+        }
 
         var notification =
             builder
                 .SetContentTitle("PSVVPN")
-                .SetContentText(
-                    "VPN در حال اجراست")
+                .SetContentText("VPN در حال اجراست")
                 .SetOngoing(true)
                 .SetSmallIcon(
                     global::Android.Resource.Drawable
                         .StatSysWarning)
                 .Build();
 
-        StartForeground(
-            1101,
-            notification);
+        StartForeground(1101, notification);
     }
 
     async Task RunTunnel(
@@ -102,18 +99,22 @@ public class TunnelService : VpnService
         TcpClient? tcp = null;
         SslStream? ssl = null;
 
+        ParcelFileDescriptor? inputDescriptor = null;
+        ParcelFileDescriptor? outputDescriptor = null;
+
         try
         {
             var pfxPath =
                 intent.GetStringExtra("pfx");
 
             var password =
-                intent.GetStringExtra(
-                    "password");
+                intent.GetStringExtra("password");
 
-            if (string.IsNullOrEmpty(pfxPath))
+            if (string.IsNullOrWhiteSpace(pfxPath))
+            {
                 throw new Exception(
-                    "مسیر PFX مشخص نشده است");
+                    "مسیر فایل PFX مشخص نشده است.");
+            }
 
             var certificate =
                 new X509Certificate2(
@@ -123,26 +124,29 @@ public class TunnelService : VpnService
 
             tcp = new TcpClient();
 
-            /*
-             * مهم:
-             * سوکت باید قبل از اضافه شدن Route
-             * به VPN از خود VPN مستثنی شود.
-             */
-            if (!Protect(tcp.Client))
-            {
-                throw new Exception(
-                    "Protect socket failed");
-            }
-
             await tcp.ConnectAsync(
                 "89.163.206.27",
                 443,
                 ct);
 
-            ssl = new SslStream(
-                tcp.GetStream(),
-                false,
-                ValidateServerCertificate);
+            /*
+             * Protect در binding فعلی .NET Android
+             * یک File Descriptor عددی دریافت می‌کند.
+             */
+            int socketFd =
+                (int)tcp.Client.Handle;
+
+            if (!Protect(socketFd))
+            {
+                throw new Exception(
+                    "امکان Protect کردن سوکت VPN وجود ندارد.");
+            }
+
+            ssl =
+                new SslStream(
+                    tcp.GetStream(),
+                    false,
+                    ValidateServerCertificate);
 
             var sslOptions =
                 new SslClientAuthenticationOptions
@@ -161,45 +165,33 @@ public class TunnelService : VpnService
                 sslOptions,
                 ct);
 
-            var builder =
+            var vpnBuilder =
                 new Builder(this);
 
-            builder.SetSession(
-                "PSVVPN");
+            vpnBuilder.SetSession("PSVVPN");
+            vpnBuilder.SetMtu(1400);
 
-            builder.SetMtu(
-                1400);
-
-            builder.AddAddress(
+            vpnBuilder.AddAddress(
                 "10.66.66.2",
                 24);
 
-            builder.AddRoute(
+            vpnBuilder.AddRoute(
                 "0.0.0.0",
                 0);
 
-            builder.AddDnsServer(
+            vpnBuilder.AddDnsServer(
                 "1.1.1.1");
 
-            tun =
-                builder.Establish();
+            tun = vpnBuilder.Establish();
 
             if (tun == null)
             {
                 throw new Exception(
-                    "TUN ایجاد نشد");
+                    "رابط TUN ایجاد نشد.");
             }
 
-            /*
-             * برای Input و Output دو descriptor
-             * مستقل می‌سازیم تا بسته‌شدن یکی
-             * باعث بسته‌شدن دیگری نشود.
-             */
-            var inputDescriptor =
-                tun.Dup();
-
-            var outputDescriptor =
-                tun.Dup();
+            inputDescriptor = tun.Dup();
+            outputDescriptor = tun.Dup();
 
             using var tunInput =
                 new ParcelFileDescriptor
@@ -210,6 +202,9 @@ public class TunnelService : VpnService
                 new ParcelFileDescriptor
                     .AutoCloseOutputStream(
                         outputDescriptor);
+
+            inputDescriptor = null;
+            outputDescriptor = null;
 
             var uploadTask =
                 PumpTunToTls(
@@ -227,16 +222,32 @@ public class TunnelService : VpnService
                 uploadTask,
                 downloadTask);
         }
-        catch (OperationCanceledException)
+        catch (System.OperationCanceledException)
         {
             // قطع عادی VPN
         }
         catch (Exception)
         {
-            // در نسخه بعدی لاگ UI اضافه می‌شود
+            // بعداً لاگ UI اضافه می‌شود.
         }
         finally
         {
+            try
+            {
+                inputDescriptor?.Close();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                outputDescriptor?.Close();
+            }
+            catch
+            {
+            }
+
             try
             {
                 ssl?.Dispose();
@@ -257,25 +268,23 @@ public class TunnelService : VpnService
         }
     }
 
-    /*
-     * فعلاً TLS handshake را می‌پذیریم تا
-     * ارتباط Pilot تست شود.
-     *
-     * قبل از نسخه Production باید SHA256
-     * گواهی سرور جدید Pin شود.
-     */
     bool ValidateServerCertificate(
         object sender,
         X509Certificate? certificate,
         X509Chain? chain,
         SslPolicyErrors errors)
     {
+        /*
+         * فقط برای Pilot.
+         * قبل از نسخه Production باید
+         * Certificate Pinning فعال شود.
+         */
         return true;
     }
 
     static async Task PumpTunToTls(
-        Stream tunStream,
-        Stream tlsStream,
+        Java.IO.InputStream tunInput,
+        System.IO.Stream tlsStream,
         CancellationToken ct)
     {
         var buffer =
@@ -283,9 +292,10 @@ public class TunnelService : VpnService
 
         while (!ct.IsCancellationRequested)
         {
-            var length =
-                await tunStream.ReadAsync(
-                    buffer.AsMemory(
+            int length =
+                await Task.Run(
+                    () => tunInput.Read(
+                        buffer,
                         0,
                         buffer.Length),
                     ct);
@@ -293,10 +303,6 @@ public class TunnelService : VpnService
             if (length <= 0)
                 break;
 
-            /*
-             * Packet framing:
-             * 4 byte big-endian packet size
-             */
             var header =
                 new byte[]
                 {
@@ -307,7 +313,7 @@ public class TunnelService : VpnService
                 };
 
             await tlsStream.WriteAsync(
-                header,
+                header.AsMemory(),
                 ct);
 
             await tlsStream.WriteAsync(
@@ -316,18 +322,16 @@ public class TunnelService : VpnService
                     length),
                 ct);
 
-            await tlsStream.FlushAsync(
-                ct);
+            await tlsStream.FlushAsync(ct);
         }
     }
 
     static async Task PumpTlsToTun(
-        Stream tlsStream,
-        Stream tunStream,
+        System.IO.Stream tlsStream,
+        Java.IO.OutputStream tunOutput,
         CancellationToken ct)
     {
-        var header =
-            new byte[4];
+        var header = new byte[4];
 
         while (!ct.IsCancellationRequested)
         {
@@ -336,7 +340,7 @@ public class TunnelService : VpnService
                 header,
                 ct);
 
-            var length =
+            int length =
                 (header[0] << 24) |
                 (header[1] << 16) |
                 (header[2] << 8) |
@@ -345,8 +349,8 @@ public class TunnelService : VpnService
             if (length <= 0 ||
                 length > 65535)
             {
-                throw new IOException(
-                    "Invalid VPN packet");
+                throw new System.IO.IOException(
+                    "Invalid VPN packet length.");
             }
 
             var packet =
@@ -357,39 +361,39 @@ public class TunnelService : VpnService
                 packet,
                 ct);
 
-            await tunStream.WriteAsync(
-                packet.AsMemory(
-                    0,
-                    packet.Length),
-                ct);
+            await Task.Run(
+                () =>
+                {
+                    tunOutput.Write(
+                        packet,
+                        0,
+                        packet.Length);
 
-            await tunStream.FlushAsync(
+                    tunOutput.Flush();
+                },
                 ct);
         }
     }
 
     static async Task ReadExact(
-        Stream stream,
+        System.IO.Stream stream,
         byte[] buffer,
         CancellationToken ct)
     {
-        var offset = 0;
+        int offset = 0;
 
-        while (offset <
-               buffer.Length)
+        while (offset < buffer.Length)
         {
-            var count =
+            int count =
                 await stream.ReadAsync(
                     buffer.AsMemory(
                         offset,
-                        buffer.Length -
-                        offset),
+                        buffer.Length - offset),
                     ct);
 
             if (count <= 0)
             {
-                throw new
-                    EndOfStreamException();
+                throw new System.IO.EndOfStreamException();
             }
 
             offset += count;
@@ -427,6 +431,13 @@ public class TunnelService : VpnService
         try
         {
             cts?.Cancel();
+        }
+        catch
+        {
+        }
+
+        try
+        {
             tun?.Close();
         }
         catch
