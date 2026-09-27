@@ -46,13 +46,14 @@ public class MainActivity : Activity
 
         var root = new LinearLayout(this)
         {
-            Orientation = Orientation.Vertical,
-            Gravity = GravityFlags.CenterHorizontal
+            Orientation = Orientation.Vertical
         };
+
+        // اصلاح خطای Build شماره 10
+        root.SetGravity(GravityFlags.CenterHorizontal);
 
         root.SetPadding(48, 80, 48, 48);
 
-        // عنوان برنامه
         var title = new TextView(this)
         {
             Text = "PSVVPN",
@@ -62,7 +63,6 @@ public class MainActivity : Activity
 
         title.SetPadding(0, 20, 0, 8);
 
-        // نام شرکت
         var company = new TextView(this)
         {
             Text = "Pishgaman Sepand Viera",
@@ -70,7 +70,6 @@ public class MainActivity : Activity
             Gravity = GravityFlags.Center
         };
 
-        // اطلاعات سرور
         var server = new TextView(this)
         {
             Text = "Secure VPN Client\n89.163.206.27 : 443",
@@ -80,13 +79,11 @@ public class MainActivity : Activity
 
         server.SetPadding(0, 8, 0, 30);
 
-        // دکمه انتخاب ZIP
         var importButton = new Button(this)
         {
             Text = "انتخاب فایل هویت VPN"
         };
 
-        // پسورد PFX
         password = new EditText(this)
         {
             Hint = "رمز فایل PFX",
@@ -97,20 +94,17 @@ public class MainActivity : Activity
             global::Android.Text.InputTypes.ClassText |
             global::Android.Text.InputTypes.TextVariationPassword;
 
-        // دکمه اتصال
         connect = new Button(this)
         {
             Text = "اتصال به VPN",
             Enabled = false
         };
 
-        // دکمه قطع
         var disconnect = new Button(this)
         {
             Text = "قطع اتصال"
         };
 
-        // وضعیت
         status = new TextView(this)
         {
             Text = "وضعیت: فایل هویت VPN را انتخاب کنید",
@@ -133,7 +127,6 @@ public class MainActivity : Activity
 
         SetContentView(scroll);
 
-        // انتخاب ZIP
         importButton.Click += (_, __) =>
         {
             try
@@ -144,8 +137,7 @@ public class MainActivity : Activity
                 intent.AddCategory(
                     Intent.CategoryOpenable);
 
-                // بعضی File Manager های Xiaomi
-                // application/zip را درست برنمی‌گردانند.
+                // برای سازگاری بهتر با File Manager شیائومی
                 intent.SetType("*/*");
 
                 StartActivityForResult(
@@ -160,7 +152,6 @@ public class MainActivity : Activity
             }
         };
 
-        // اتصال
         connect.Click += (_, __) =>
         {
             try
@@ -175,7 +166,6 @@ public class MainActivity : Activity
             }
         };
 
-        // قطع اتصال
         disconnect.Click += (_, __) =>
         {
             try
@@ -351,7 +341,6 @@ public class MainActivity : Activity
             pfxPath,
             true);
 
-        // خواندن کانفیگ
         var json =
             File.ReadAllText(configPath);
 
@@ -364,14 +353,13 @@ public class MainActivity : Activity
                 })
             ?? new ClientConfig();
 
-        // سرور جدید PSVVPN
+        // Endpoint جدید PSVVPN
         config.Host =
             "89.163.206.27";
 
         config.Port =
             443;
 
-        // ذخیره کانفیگ اصلاح‌شده
         File.WriteAllText(
             configPath,
             JsonSerializer.Serialize(
