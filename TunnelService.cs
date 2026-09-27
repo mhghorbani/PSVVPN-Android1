@@ -9,7 +9,7 @@ using System.Security.Cryptography.X509Certificates;
 namespace PSVVPN.Android;
 
 [Service(Name="com.psvvpn.client.TunnelService", Permission="android.permission.BIND_VPN_SERVICE", Exported=false,
-         ForegroundServiceType=Android.Content.PM.ForegroundService.TypeSpecialUse)]
+         ForegroundServiceType=global::Android.Content.PM.ForegroundService.TypeSpecialUse)]
 [IntentFilter(new[]{"android.net.VpnService"})]
 public class TunnelService : VpnService
 {
