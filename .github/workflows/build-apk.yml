@@ -2,6 +2,8 @@ name: Build PSVVPN APK
 
 on:
   push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -20,18 +22,44 @@ jobs:
       - name: Install Android workload
         run: dotnet workload install android
 
-      - name: Build PSVVPN APK
-        run: dotnet publish PSVVPN.Android.csproj -c Release -f net9.0-android -p:AndroidPackageFormat=apk
+      - name: Build signed Debug APK
+        run: |
+          dotnet build PSVVPN.Android.csproj \
+            -c Debug \
+            -f net9.0-android \
+            -p:AndroidPackageFormat=apk
 
-      - name: Collect APK
+      - name: Find APK
+        run: |
+          echo "Generated APK files:"
+          find bin/Debug -type f -name "*.apk" -print
+
+      - name: Collect signed APK
         run: |
           mkdir -p out
-          APK=$(find bin/Release -name '*.apk' -type f | head -1)
-          cp "$APK" out/PSVVPN-Android-0.2-pilot.apk
-          ls -lah out
 
-      - name: Upload APK
+          APK=$(find bin/Debug -type f -name "*-Signed.apk" | head -1)
+
+          if [ -z "$APK" ]; then
+            APK=$(find bin/Debug -type f -name "*.apk" | head -1)
+          fi
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK not found"
+            exit 1
+          fi
+
+          echo "Using APK: $APK"
+
+          cp "$APK" \
+            out/PSVVPN-Android-0.3-pilot-signed.apk
+
+          ls -lh out
+
+      - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: PSVVPN-Android-0.2-pilot
-          path: out/PSVVPN-Android-0.2-pilot.apk
+          name: PSVVPN-Android-0.3-pilot-signed
+          path: out/PSVVPN-Android-0.3-pilot-signed.apk
+          if-no-files-found: error
+          retention-days: 30
