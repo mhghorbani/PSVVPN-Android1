@@ -272,4 +272,37 @@ public class MainActivity : Activity
         }
         else
         {
-            Start
+                        StartService(intent);
+        }
+
+        status.Text =
+            "وضعیت: در حال اتصال...";
+    }
+}
+
+public class ClientConfig
+{
+    public string Host { get; set; }
+        = "89.163.206.27";
+
+    public int Port { get; set; }
+        = 443;
+
+    public string ServerCertificateSha256
+    {
+        get;
+        set;
+    } = "";
+
+    public string CertificateFile
+    {
+        get;
+        set;
+    } = "client.pfx";
+
+    public string AdapterName
+    {
+        get;
+        set;
+    } = "PSVVPN";
+}
