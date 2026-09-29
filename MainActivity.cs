@@ -4,539 +4,88 @@ using Android.Net;
 using Android.OS;
 using Android.Views;
 using Android.Widget;
+using NPViera.Configuration;
+using NPViera.Domain;
 using System.IO.Compression;
 using System.Text.Json;
 
 namespace PSVVPN.Android;
 
-[Activity(
-    Label = "PSVVPN",
-    MainLauncher = true,
-    Exported = true
-)]
+[Activity(Label="NPViera", MainLauncher=true, Exported=true)]
 public class MainActivity : Activity
 {
-    const int PickZip = 1001;
-    const int VpnReq = 1002;
+    const int PickZip=1001, VpnReq=1002;
+    TextView status=null!, server=null!;
+    EditText password=null!;
+    Button connect=null!;
+    string? configPath,pfxPath;
+    VpnConfiguration? config;
 
-    TextView status = null!;
-    EditText password = null!;
-    Button connect = null!;
-
-    string? configPath;
-    string? pfxPath;
-
-    protected override void OnCreate(Bundle? savedInstanceState)
-    {
-        base.OnCreate(savedInstanceState);
-
-        try
-        {
-            BuildInterface();
-        }
-        catch (Exception ex)
-        {
-            ShowStartupError(ex);
-        }
-    }
+    protected override void OnCreate(Bundle? state){base.OnCreate(state);BuildInterface();}
 
     void BuildInterface()
     {
-        var scroll = new ScrollView(this);
+        var scroll=new ScrollView(this);
+        var root=new LinearLayout(this){Orientation=Orientation.Vertical};
+        root.SetGravity(GravityFlags.CenterHorizontal); root.SetPadding(48,80,48,48);
+        var title=new TextView(this){Text="NPViera",TextSize=34,Gravity=GravityFlags.Center};
+        var sub=new TextView(this){Text="Secure Enterprise VPN",TextSize=16,Gravity=GravityFlags.Center};
+        server=new TextView(this){Text="Server: not configured",TextSize=14,Gravity=GravityFlags.Center};
+        var import=new Button(this){Text="انتخاب فایل هویت VPN"};
+        password=new EditText(this){Hint="رمز فایل PFX",Gravity=GravityFlags.Center};
+        password.InputType=global::Android.Text.InputTypes.ClassText|global::Android.Text.InputTypes.TextVariationPassword;
+        connect=new Button(this){Text="اتصال",Enabled=false};
+        var disconnect=new Button(this){Text="قطع اتصال"};
+        status=new TextView(this){Text="وضعیت: آماده‌سازی",TextSize=15,Gravity=GravityFlags.Center};
+        foreach(var v in new View[]{title,sub,server,import,password,connect,disconnect,status})
+            root.AddView(v,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent,ViewGroup.LayoutParams.WrapContent){TopMargin=14});
+        scroll.AddView(root);SetContentView(scroll);
 
-        var root = new LinearLayout(this)
-        {
-            Orientation = Orientation.Vertical
-        };
-
-        // اصلاح خطای Build شماره 10
-        root.SetGravity(GravityFlags.CenterHorizontal);
-
-        root.SetPadding(48, 80, 48, 48);
-
-        var title = new TextView(this)
-        {
-            Text = "PSVVPN",
-            TextSize = 34,
-            Gravity = GravityFlags.Center
-        };
-
-        title.SetPadding(0, 20, 0, 8);
-
-        var company = new TextView(this)
-        {
-            Text = "Pishgaman Sepand Viera",
-            TextSize = 17,
-            Gravity = GravityFlags.Center
-        };
-
-        var server = new TextView(this)
-        {
-            Text = "Secure VPN Client\n89.163.206.27 : 443",
-            TextSize = 14,
-            Gravity = GravityFlags.Center
-        };
-
-        server.SetPadding(0, 8, 0, 30);
-
-        var importButton = new Button(this)
-        {
-            Text = "انتخاب فایل هویت VPN"
-        };
-
-        password = new EditText(this)
-        {
-            Hint = "رمز فایل PFX",
-            Gravity = GravityFlags.Center
-        };
-
-        password.InputType =
-            global::Android.Text.InputTypes.ClassText |
-            global::Android.Text.InputTypes.TextVariationPassword;
-
-        connect = new Button(this)
-        {
-            Text = "اتصال به VPN",
-            Enabled = false
-        };
-
-        var disconnect = new Button(this)
-        {
-            Text = "قطع اتصال"
-        };
-
-        status = new TextView(this)
-        {
-            Text = "وضعیت: فایل هویت VPN را انتخاب کنید",
-            TextSize = 15,
-            Gravity = GravityFlags.Center
-        };
-
-        status.SetPadding(0, 25, 0, 10);
-
-        Add(root, title);
-        Add(root, company);
-        Add(root, server);
-        Add(root, importButton);
-        Add(root, password);
-        Add(root, connect);
-        Add(root, disconnect);
-        Add(root, status);
-
-        scroll.AddView(root);
-
-        SetContentView(scroll);
-
-        importButton.Click += (_, __) =>
-        {
-            try
-            {
-                var intent =
-                    new Intent(Intent.ActionOpenDocument);
-
-                intent.AddCategory(
-                    Intent.CategoryOpenable);
-
-                // برای سازگاری بهتر با File Manager شیائومی
-                intent.SetType("*/*");
-
-                StartActivityForResult(
-                    intent,
-                    PickZip);
-            }
-            catch (Exception ex)
-            {
-                status.Text =
-                    "خطای انتخاب فایل: " +
-                    ex.Message;
-            }
-        };
-
-        connect.Click += (_, __) =>
-        {
-            try
-            {
-                StartVpn();
-            }
-            catch (Exception ex)
-            {
-                status.Text =
-                    "خطای اتصال: " +
-                    ex.Message;
-            }
-        };
-
-        disconnect.Click += (_, __) =>
-        {
-            try
-            {
-                var intent =
-                    new Intent(
-                        this,
-                        typeof(TunnelService));
-
-                intent.SetAction("STOP");
-
-                if (Build.VERSION.SdkInt >=
-                    BuildVersionCodes.O)
-                {
-                    StartForegroundService(intent);
-                }
-                else
-                {
-                    StartService(intent);
-                }
-
-                status.Text =
-                    "وضعیت: اتصال قطع شد";
-            }
-            catch (Exception ex)
-            {
-                status.Text =
-                    "خطای قطع اتصال: " +
-                    ex.Message;
-            }
-        };
+        import.Click+=(_,__)=>{var i=new Intent(Intent.ActionOpenDocument);i.AddCategory(Intent.CategoryOpenable);i.SetType("*/*");StartActivityForResult(i,PickZip);};
+        connect.Click+=(_,__)=>StartVpn();
+        disconnect.Click+=(_,__)=>{var i=new Intent(this,typeof(TunnelService));i.SetAction("STOP");StartService(i);status.Text="وضعیت: قطع شد";};
+        status.Text="وضعیت: فایل هویت را انتخاب کنید";
     }
 
-    static void Add(
-        LinearLayout root,
-        View view)
+    protected override void OnActivityResult(int requestCode,Result resultCode,Intent? data)
     {
-        root.AddView(
-            view,
-            new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MatchParent,
-                ViewGroup.LayoutParams.WrapContent)
-            {
-                TopMargin = 14
-            });
+        base.OnActivityResult(requestCode,resultCode,data);
+        try{
+            if(requestCode==PickZip&&resultCode==Result.Ok&&data?.Data!=null){ImportIdentityZip(data.Data);return;}
+            if(requestCode==VpnReq){if(resultCode==Result.Ok)LaunchService();else status.Text="مجوز VPN تأیید نشد";}
+        }catch(Exception ex){status.Text="خطا: "+ex.Message;}
     }
 
-    protected override void OnActivityResult(
-        int requestCode,
-        Result resultCode,
-        Intent? data)
+    void ImportIdentityZip(global::Android.Net.Uri uri)
     {
-        base.OnActivityResult(
-            requestCode,
-            resultCode,
-            data);
-
-        try
-        {
-            if (requestCode == PickZip &&
-                resultCode == Result.Ok &&
-                data?.Data != null)
-            {
-                ImportIdentityZip(data.Data);
-                return;
-            }
-
-            if (requestCode == VpnReq)
-            {
-                if (resultCode == Result.Ok)
-                {
-                    LaunchService();
-                }
-                else
-                {
-                    status.Text =
-                        "مجوز VPN توسط کاربر تأیید نشد";
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            if (status != null)
-            {
-                status.Text =
-                    "خطا: " +
-                    ex.Message;
-            }
-            else
-            {
-                ShowStartupError(ex);
-            }
-        }
-    }
-
-    void ImportIdentityZip(
-        global::Android.Net.Uri uri)
-    {
-        status.Text =
-            "وضعیت: در حال بررسی فایل...";
-
-        using var input =
-            ContentResolver?.OpenInputStream(uri);
-
-        if (input == null)
-        {
-            throw new Exception(
-                "فایل انتخاب‌شده قابل خواندن نیست.");
-        }
-
-        var dir =
-            Path.Combine(
-                FilesDir!.AbsolutePath,
-                "identity");
-
-        Directory.CreateDirectory(dir);
-
-        using var zip =
-            new ZipArchive(
-                input,
-                ZipArchiveMode.Read);
-
-        ZipArchiveEntry? configEntry = null;
-        ZipArchiveEntry? pfxEntry = null;
-
-        foreach (var entry in zip.Entries)
-        {
-            var name =
-                Path.GetFileName(entry.FullName);
-
-            if (name.Equals(
-                "client.json",
-                StringComparison.OrdinalIgnoreCase))
-            {
-                configEntry = entry;
-            }
-
-            if (name.Equals(
-                "client.pfx",
-                StringComparison.OrdinalIgnoreCase))
-            {
-                pfxEntry = entry;
-            }
-        }
-
-        if (configEntry == null)
-        {
-            throw new Exception(
-                "فایل client.json داخل ZIP پیدا نشد.");
-        }
-
-        if (pfxEntry == null)
-        {
-            throw new Exception(
-                "فایل client.pfx داخل ZIP پیدا نشد.");
-        }
-
-        configPath =
-            Path.Combine(
-                dir,
-                "client.json");
-
-        pfxPath =
-            Path.Combine(
-                dir,
-                "client.pfx");
-
-        configEntry.ExtractToFile(
-            configPath,
-            true);
-
-        pfxEntry.ExtractToFile(
-            pfxPath,
-            true);
-
-        var json =
-            File.ReadAllText(configPath);
-
-        var config =
-            JsonSerializer.Deserialize<ClientConfig>(
-                json,
-                new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                })
-            ?? new ClientConfig();
-
-        // Endpoint جدید PSVVPN
-        config.Host =
-            "89.163.206.27";
-
-        config.Port =
-            443;
-
-        File.WriteAllText(
-            configPath,
-            JsonSerializer.Serialize(
-                config,
-                new JsonSerializerOptions
-                {
-                    WriteIndented = true
-                }));
-
-        connect.Enabled = true;
-
-        status.Text =
-            "وضعیت: فایل هویت با موفقیت وارد شد";
+        status.Text="وضعیت: بررسی هویت...";
+        using var input=ContentResolver?.OpenInputStream(uri)??throw new Exception("فایل قابل خواندن نیست.");
+        var dir=Path.Combine(FilesDir!.AbsolutePath,"identity");Directory.CreateDirectory(dir);
+        using var zip=new ZipArchive(input,ZipArchiveMode.Read);
+        var ce=zip.Entries.FirstOrDefault(x=>Path.GetFileName(x.FullName).Equals("client.json",StringComparison.OrdinalIgnoreCase));
+        var pe=zip.Entries.FirstOrDefault(x=>Path.GetFileName(x.FullName).Equals("client.pfx",StringComparison.OrdinalIgnoreCase));
+        if(ce==null||pe==null)throw new Exception("client.json یا client.pfx در ZIP پیدا نشد.");
+        configPath=Path.Combine(dir,"client.json");pfxPath=Path.Combine(dir,"client.pfx");
+        ce.ExtractToFile(configPath,true);pe.ExtractToFile(pfxPath,true);
+        config=JsonSerializer.Deserialize<VpnConfiguration>(File.ReadAllText(configPath),new JsonSerializerOptions{PropertyNameCaseInsensitive=true});
+        if(!ConfigurationValidator.IsValid(config))throw new Exception("NPV-CFG-001: تنظیمات اتصال معتبر نیست.");
+        server.Text=$"Server: {config!.Host}:{config.Port}";
+        connect.Enabled=true;status.Text="وضعیت: هویت آماده است";
     }
 
     void StartVpn()
     {
-        if (string.IsNullOrWhiteSpace(
-            password.Text))
-        {
-            status.Text =
-                "رمز فایل PFX را وارد کنید";
-
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(
-            pfxPath))
-        {
-            status.Text =
-                "ابتدا فایل هویت VPN را انتخاب کنید";
-
-            return;
-        }
-
-        var prepareIntent =
-            VpnService.Prepare(this);
-
-        if (prepareIntent != null)
-        {
-            status.Text =
-                "در انتظار تأیید مجوز VPN...";
-
-            StartActivityForResult(
-                prepareIntent,
-                VpnReq);
-        }
-        else
-        {
-            LaunchService();
-        }
+        if(config==null||string.IsNullOrWhiteSpace(configPath)||string.IsNullOrWhiteSpace(pfxPath)){status.Text="ابتدا فایل هویت را انتخاب کنید";return;}
+        if(string.IsNullOrWhiteSpace(password.Text)){status.Text="رمز PFX را وارد کنید";return;}
+        var p=VpnService.Prepare(this);
+        if(p!=null){status.Text="در انتظار مجوز VPN...";StartActivityForResult(p,VpnReq);}else LaunchService();
     }
 
     void LaunchService()
     {
-        if (string.IsNullOrWhiteSpace(
-            pfxPath))
-        {
-            status.Text =
-                "فایل PFX موجود نیست";
-
-            return;
-        }
-
-        var intent =
-            new Intent(
-                this,
-                typeof(TunnelService));
-
-        intent.SetAction("START");
-
-        intent.PutExtra(
-            "config",
-            configPath ?? "");
-
-        intent.PutExtra(
-            "pfx",
-            pfxPath);
-
-        intent.PutExtra(
-            "password",
-            password.Text ?? "");
-
-        if (Build.VERSION.SdkInt >=
-            BuildVersionCodes.O)
-        {
-            StartForegroundService(intent);
-        }
-        else
-        {
-            StartService(intent);
-        }
-
-        status.Text =
-            "وضعیت: در حال اتصال به PSVVPN...";
+        var i=new Intent(this,typeof(TunnelService));i.SetAction("START");
+        i.PutExtra("config",configPath);i.PutExtra("pfx",pfxPath);i.PutExtra("password",password.Text??"");
+        if(Build.VERSION.SdkInt>=BuildVersionCodes.O)StartForegroundService(i);else StartService(i);
+        status.Text="وضعیت: در حال اتصال...";
     }
-
-    void ShowStartupError(
-        Exception ex)
-    {
-        try
-        {
-            var root =
-                new LinearLayout(this)
-                {
-                    Orientation =
-                        Orientation.Vertical
-                };
-
-            root.SetPadding(
-                40,
-                80,
-                40,
-                40);
-
-            var title =
-                new TextView(this)
-                {
-                    Text =
-                        "PSVVPN - Startup Error",
-                    TextSize = 22
-                };
-
-            var error =
-                new TextView(this)
-                {
-                    Text =
-                        ex.ToString(),
-                    TextSize = 14
-                };
-
-            root.AddView(title);
-            root.AddView(error);
-
-            SetContentView(root);
-        }
-        catch
-        {
-            Toast.MakeText(
-                this,
-                "PSVVPN startup error: " +
-                ex.Message,
-                ToastLength.Long
-            )?.Show();
-        }
-    }
-}
-
-public class ClientConfig
-{
-    public string Host
-    {
-        get;
-        set;
-    } = "89.163.206.27";
-
-    public int Port
-    {
-        get;
-        set;
-    } = 443;
-
-    public string ServerCertificateSha256
-    {
-        get;
-        set;
-    } = "";
-
-    public string CertificateFile
-    {
-        get;
-        set;
-    } = "client.pfx";
-
-    public string AdapterName
-    {
-        get;
-        set;
-    } = "PSVVPN";
 }
